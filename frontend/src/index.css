@@ -1,0 +1,104 @@
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap');
+
+@config "../tailwind.config.js";
+
+@layer base {
+  body {
+    @apply bg-background text-on-surface antialiased min-h-screen selection:bg-primary/20 selection:text-primary;
+    font-family: 'Inter', sans-serif;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+  }
+}
+
+/* Glassmorphism panel styles */
+.glass-panel {
+  background: rgba(26, 29, 33, 0.8);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.card-border {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Grid Patterns */
+.bg-graph-motif {
+  background-image: radial-gradient(circle at 50% 50%, rgba(197, 198, 204, 0.03) 1px, transparent 1px),
+                    radial-gradient(circle at 20% 80%, rgba(197, 198, 204, 0.05) 2px, transparent 2px),
+                    radial-gradient(circle at 80% 20%, rgba(80, 124, 255, 0.05) 2px, transparent 2px);
+  background-size: 40px 40px, 120px 120px, 150px 150px;
+}
+
+.bg-grid-pattern {
+  background-image: 
+    linear-gradient(to right, rgba(255,255,255,0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255,255,255,0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* Input Glowing on focus */
+.input-glow:focus-within {
+  box-shadow: inset 0 0 0 1px #507cff, 0 0 12px rgba(80, 124, 255, 0.1);
+  border-color: #507cff;
+}
+
+.input-field {
+  background-color: #0c0e11;
+  border: 1px solid #45474a;
+  color: #e2e2e6;
+  transition: all 0.2s ease-in-out;
+}
+
+.input-field:focus {
+  outline: none;
+  border-color: #c5c6cc;
+  box-shadow: inset 0 0 0 1px #c5c6cc;
+}
+
+/* Custom animations */
+@keyframes pulse-ring {
+  0% { transform: scale(0.8); opacity: 0.5; }
+  100% { transform: scale(1.5); opacity: 0; }
+}
+
+.pulse-circle::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 1px solid #c5c6cc;
+  animation: pulse-ring 2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+}
+
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+
+.icon-fill {
+  font-variation-settings: 'FILL' 1;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(12, 14, 17, 0.3);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(197, 198, 204, 0.2);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(197, 198, 204, 0.4);
+}

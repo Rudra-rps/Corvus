@@ -1,0 +1,20 @@
+# Dependencies and build output
+frontend/node_modules/
+frontend/dist/
+
+# Python cache
+ai-service/__pycache__/
+ai-service/.venv/
+
+# Local database and env files
+backend/*.db
+backend/*.sqlite
+backend/.env
+ai-service/.env
+frontend/.env
+.env
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/
