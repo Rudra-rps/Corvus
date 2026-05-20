@@ -46,7 +46,7 @@ Optional frontend environment variable:
 2. Enter any phone number
 3. Use OTP `123456`
 4. Complete borrower onboarding
-5. Upload [sample-statement.csv](/C:/Users/2005r/Downloads/loan/sample-statement.csv)
+5. Upload `sample-statement.csv`
 6. Wait for analysis to complete
 7. Review dashboard, lender recommendations, and explainability screens
 
