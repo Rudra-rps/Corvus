@@ -6,6 +6,16 @@ Corvus AI is a hackathon-ready alternative credit intelligence platform for unde
 - `backend`: Go + Fiber API with SQLite fallback and lender seeding
 - `ai-service`: FastAPI deterministic scoring and explainability service
 
+## Intake Modes
+
+Corvus now supports three underwriting entry paths:
+
+- `Quick Estimate`: intent-first provisional scoring
+- `Manual Snapshot`: self-declared financial snapshot for provisional scoring
+- `CSV Verification`: transaction-backed verified scoring
+
+Scores and recommendations are labeled as `provisional` or `verified` depending on the evidence level.
+
 ## Local Run
 
 ### 1. Start the AI service
@@ -46,7 +56,10 @@ Optional frontend environment variable:
 2. Enter any phone number
 3. Use OTP `123456`
 4. Complete borrower onboarding
-5. Upload `sample-statement.csv`
+5. Choose one intake path:
+   - run a quick estimate
+   - complete a manual snapshot
+   - or upload `sample-statement.csv`
 6. Wait for analysis to complete
 7. Review dashboard, lender recommendations, and explainability screens
 

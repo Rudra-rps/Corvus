@@ -29,6 +29,18 @@ class BorrowerProfileInput(BaseModel):
     age: int | None = None
 
 
+class IntakeInput(BaseModel):
+    intake_source: str = "quick_estimate"
+    loan_purpose: str = ""
+    loan_amount_needed: float = 0
+    urgency: str = ""
+    use_case: str = ""
+    avg_balance_band: str = ""
+    rent_amount: float = 0
+    declared_spending: float = 0
+    business_vintage: str = ""
+
+
 class ClassifyTransactionsRequest(BaseModel):
     transactions: list[TransactionInput]
 
@@ -36,6 +48,11 @@ class ClassifyTransactionsRequest(BaseModel):
 class TrustScoreRequest(BaseModel):
     transactions: list[TransactionInput]
     profile: BorrowerProfileInput
+
+
+class ProvisionalScoreRequest(BaseModel):
+    profile: BorrowerProfileInput
+    intake: IntakeInput
 
 
 class RiskAnalysisRequest(BaseModel):
@@ -185,6 +202,73 @@ def generate_trust_score(payload: TrustScoreRequest) -> dict[str, Any]:
             "emi_discipline": round(emi_discipline, 2),
             "balance_score": round(balance_score, 2),
             "income_months": len(monthly_incomes),
+        },
+    }
+
+
+@app.post("/generate-provisional-score")
+def generate_provisional_score(payload: ProvisionalScoreRequest) -> dict[str, Any]:
+    income = payload.profile.monthly_income or 0
+    emi = payload.profile.monthly_emi or 0
+    rent = payload.intake.rent_amount or 0
+    declared_spending = payload.intake.declared_spending or max(income * 0.45, 0)
+
+    dti_ratio = safe_ratio(emi + rent, income or 1) * 100
+    expense_ratio = safe_ratio(declared_spending + emi + rent, income or 1) * 100
+
+    stability_bonus = {
+        "salaried": 82,
+        "self-employed professional": 70,
+        "business owner": 66,
+    }.get(payload.profile.employment_type.strip().lower(), 60)
+    urgency_adjustment = {
+        "immediate": -8,
+        "this month": -4,
+        "2-4 weeks": 0,
+        "flexible": 3,
+    }.get(payload.intake.urgency.strip().lower(), 0)
+    balance_bonus = {
+        "below_25k": 30,
+        "25k_75k": 48,
+        "75k_150k": 62,
+        "150k_plus": 78,
+    }.get(payload.intake.avg_balance_band, 42)
+    purpose_bonus = {
+        "working_capital": 4,
+        "business_expansion": 3,
+        "education": 2,
+        "medical": 0,
+        "consumer": -2,
+        "debt_consolidation": -3,
+    }.get(payload.intake.loan_purpose, 0)
+
+    emi_discipline = clamp(100 - dti_ratio * 1.25)
+    spending_consistency = clamp(100 - max(expense_ratio - 45, 0) * 1.1)
+    income_stability = clamp(stability_bonus + urgency_adjustment)
+    balance_score = clamp(balance_bonus)
+
+    trust_score = round(
+        income_stability * 0.40
+        + emi_discipline * 0.25
+        + balance_score * 0.20
+        + spending_consistency * 0.15
+        + purpose_bonus,
+        2,
+    )
+
+    return {
+        "trust_score": clamp(trust_score),
+        "metrics": {
+            "monthly_income": round(income, 2),
+            "monthly_spending": round(declared_spending, 2),
+            "average_balance": round(balance_score / 100 * max(income, 1), 2),
+            "emi_burden": round(dti_ratio, 2),
+            "income_stability": round(income_stability, 2),
+            "spending_consistency": round(spending_consistency, 2),
+            "emi_discipline": round(emi_discipline, 2),
+            "balance_score": round(balance_score, 2),
+            "score_status": "provisional",
+            "intake_source": payload.intake.intake_source,
         },
     }
 

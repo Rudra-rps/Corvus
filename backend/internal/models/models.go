@@ -34,6 +34,16 @@ type FinancialProfile struct {
 	SpendingConsistency float64   `json:"spending_consistency"`
 	EMIDiscipline       float64   `json:"emi_discipline"`
 	BalanceScore        float64   `json:"balance_score"`
+	ScoreStatus         string    `json:"score_status"`
+	IntakeSource        string    `json:"intake_source"`
+	LoanPurpose         string    `json:"loan_purpose"`
+	LoanAmountNeeded    float64   `json:"loan_amount_needed"`
+	Urgency             string    `json:"urgency"`
+	UseCase             string    `json:"use_case"`
+	AvgBalanceBand      string    `json:"avg_balance_band"`
+	RentAmount          float64   `json:"rent_amount"`
+	DeclaredSpending    float64   `json:"declared_spending"`
+	BusinessVintage     string    `json:"business_vintage"`
 	Summary             string    `json:"summary"`
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
@@ -78,6 +88,8 @@ type Recommendation struct {
 	Explanation         string    `json:"explanation"`
 	InterestRateRange   string    `json:"interest_rate_range"`
 	Rank                int       `json:"rank"`
+	ScoreStatus         string    `json:"score_status"`
+	IntakeSource        string    `json:"intake_source"`
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
 }

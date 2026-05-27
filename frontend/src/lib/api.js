@@ -39,6 +39,14 @@ export function saveProfile(userId, payload) {
   });
 }
 
+export function saveIntake(userId, payload) {
+  return request(`/intake/${userId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
 export function uploadTransactions(userId, file) {
   const form = new FormData();
   form.append('user_id', String(userId));
@@ -49,8 +57,9 @@ export function uploadTransactions(userId, file) {
   });
 }
 
-export function analyzeUser(userId) {
-  return request(`/analyze/${userId}`, { method: 'POST' });
+export function analyzeUser(userId, options = {}) {
+  const search = new URLSearchParams(options).toString();
+  return request(`/analyze/${userId}${search ? `?${search}` : ''}`, { method: 'POST' });
 }
 
 export function fetchDashboard(userId) {

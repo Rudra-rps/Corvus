@@ -18,6 +18,18 @@ type profileRequest struct {
 	MonthlyEMI     float64 `json:"monthly_emi"`
 }
 
+type intakeRequest struct {
+	IntakeSource     string  `json:"intake_source"`
+	LoanPurpose      string  `json:"loan_purpose"`
+	LoanAmountNeeded float64 `json:"loan_amount_needed"`
+	Urgency          string  `json:"urgency"`
+	UseCase          string  `json:"use_case"`
+	AvgBalanceBand   string  `json:"avg_balance_band"`
+	RentAmount       float64 `json:"rent_amount"`
+	DeclaredSpending float64 `json:"declared_spending"`
+	BusinessVintage  string  `json:"business_vintage"`
+}
+
 type dashboardResponse struct {
 	User struct {
 		ID             uint    `json:"id"`

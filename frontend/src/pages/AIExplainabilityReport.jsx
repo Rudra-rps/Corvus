@@ -2,6 +2,8 @@ import React from 'react';
 
 export default function AIExplainabilityReport({ setCurrentPage, session }) {
   const explanations = session?.explanations;
+  const scoreStatus = explanations?.score_status || 'pending';
+  const intakeSource = explanations?.intake_source || 'unknown';
   const weights = explanations?.weights || [
     { name: 'Income Stability', weight: 40, value: 0 },
     { name: 'EMI Discipline', weight: 25, value: 0 },
@@ -25,6 +27,11 @@ export default function AIExplainabilityReport({ setCurrentPage, session }) {
                 <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-primary/10 text-primary border border-primary/20">
                   ID: TX-8924A
                 </span>
+                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${
+                  scoreStatus === 'verified' ? 'bg-emerald-500/10 text-emerald-200 border-emerald-300/20' : 'bg-sky-500/10 text-sky-200 border-sky-300/20'
+                }`}>
+                  {scoreStatus}
+                </span>
               </div>
               <p className="font-body-lg text-body-lg text-on-surface-variant max-w-2xl">
                 {explanations?.summary || 'Comprehensive breakdown of algorithmic assessment and weighted factors influencing the final trust score.'}
@@ -42,6 +49,7 @@ export default function AIExplainabilityReport({ setCurrentPage, session }) {
               <div>
                 <p className="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider mb-1">Trust Index</p>
                 <p className="font-label-md text-label-md text-primary">{explanations?.risk_category || 'Pending'}</p>
+                <p className="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-[0.2em] mt-2">{intakeSource.replaceAll('_', ' ')}</p>
               </div>
             </div>
           </div>
@@ -86,7 +94,11 @@ export default function AIExplainabilityReport({ setCurrentPage, session }) {
                 <div className="absolute -left-[5px] top-1.5 h-2.5 w-2.5 rounded-full bg-error border-2 border-surface-container-low"></div>
                 <p className="font-label-sm text-label-sm text-error mb-1">Risk window</p>
                 <p className="font-label-md text-label-md text-on-surface">Repayment pressure assessed</p>
-                <p className="font-body-md text-body-md text-on-surface-variant mt-1 text-sm">EMI load, balance buffer, and spending behavior were combined into a deterministic risk score.</p>
+                <p className="font-body-md text-body-md text-on-surface-variant mt-1 text-sm">
+                  {scoreStatus === 'verified'
+                    ? 'EMI load, balance buffer, and transaction behavior were combined into a deterministic risk score.'
+                    : 'Self-declared income, obligations, and loan intent were combined into a provisional risk score.'}
+                </p>
               </div>
               <div className="relative pl-6">
                 <div className="absolute -left-[5px] top-1.5 h-2.5 w-2.5 rounded-full bg-primary border-2 border-surface-container-low"></div>

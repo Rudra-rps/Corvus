@@ -4,6 +4,7 @@ export default function LenderRecommendations({ setCurrentPage, session }) {
   const recommendations = session?.recommendations || [];
   const topRecommendation = recommendations[0];
   const secondRecommendation = recommendations[1];
+  const scoreStatus = topRecommendation?.score_status || session?.dashboard?.metrics?.score_status || 'pending';
   const [messages, setMessages] = useState([
     { sender: 'agent', text: "I've ranked the best lenders for this profile. Ask me to compare rates, collateral assumptions, or approval confidence." },
   ]);
@@ -97,6 +98,11 @@ export default function LenderRecommendations({ setCurrentPage, session }) {
           <div>
             <div className="flex items-center gap-2 mb-2">
               <span className="px-2.5 py-0.5 rounded-full bg-tertiary-container/30 text-tertiary border border-tertiary-container font-label-sm text-label-sm tracking-wider uppercase text-xs">Analysis Complete</span>
+              <span className={`px-2.5 py-0.5 rounded-full border font-label-sm text-label-sm tracking-wider uppercase text-xs ${
+                scoreStatus === 'verified' ? 'bg-emerald-500/10 text-emerald-200 border-emerald-300/20' : 'bg-sky-500/10 text-sky-200 border-sky-300/20'
+              }`}>
+                {scoreStatus}
+              </span>
               <span className="font-label-sm text-label-sm text-on-surface-variant font-mono">ID: C-8842-X</span>
             </div>
             <h2 className="font-headline-lg-mobile md:font-headline-lg text-headline-lg-mobile md:text-headline-lg text-on-surface">Lender Recommendations</h2>
@@ -142,6 +148,15 @@ export default function LenderRecommendations({ setCurrentPage, session }) {
                 </div>
                 <div className="w-full bg-surface-variant rounded-full h-1.5">
                   <div className="bg-outline h-1.5 rounded-full" style={{ width: `${topRecommendation?.approval_probability || 0}%` }}></div>
+                </div>
+              </div>
+              <div>
+                <div className="flex justify-between mb-1">
+                  <span className="font-label-sm text-label-sm text-on-surface-variant">Confidence State</span>
+                  <span className="font-label-sm text-label-sm text-on-surface">{scoreStatus}</span>
+                </div>
+                <div className="w-full bg-surface-variant rounded-full h-1.5">
+                  <div className="bg-outline h-1.5 rounded-full" style={{ width: `${scoreStatus === 'verified' ? 92 : 68}%` }}></div>
                 </div>
               </div>
             </div>

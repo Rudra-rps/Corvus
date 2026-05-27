@@ -5,6 +5,8 @@ export default function UnderwritingCockpit({ setCurrentPage, session }) {
   const user = session?.user;
   const metrics = dashboard?.metrics;
   const topCategories = dashboard?.charts?.category_breakdown?.slice(0, 4) || [];
+  const scoreStatus = metrics?.score_status || 'pending';
+  const intakeSource = metrics?.intake_source || 'unknown';
 
   return (
     <div className="flex-1 w-full bg-grid-pattern min-h-screen flex flex-col pb-24">
@@ -18,6 +20,15 @@ export default function UnderwritingCockpit({ setCurrentPage, session }) {
             <span className="w-2 h-2 rounded-full bg-tertiary animate-pulse"></span>
             <span className="font-label-sm text-label-sm text-on-surface">Graphite Node Active</span>
           </div>
+          {metrics && (
+            <div className={`px-3 py-1.5 rounded-full border text-xs uppercase tracking-[0.2em] ${
+              scoreStatus === 'verified'
+                ? 'bg-emerald-500/10 border-emerald-400/30 text-emerald-200'
+                : 'bg-sky-500/10 border-sky-400/30 text-sky-200'
+            }`}>
+              {scoreStatus}
+            </div>
+          )}
           <button onClick={() => setCurrentPage('onboarding')} className="hidden sm:flex bg-primary hover:bg-white text-on-primary font-label-md text-label-md px-4 py-2 rounded-lg transition-colors gap-2 items-center">
             New Analysis
             <span className="material-symbols-outlined text-[16px]">add</span>
@@ -36,7 +47,9 @@ export default function UnderwritingCockpit({ setCurrentPage, session }) {
                 </div>
                 <div>
                   <h4 className="font-headline-md text-[18px] text-on-surface font-semibold">{user?.name || 'Corvus Borrower'}</h4>
-                  <p className="font-body-md text-body-md text-on-surface-variant text-sm">{user?.employment_type || 'Employment Pending'} • {user?.city || 'India'}</p>
+                  <p className="font-body-md text-body-md text-on-surface-variant text-sm">
+                    {user?.employment_type || 'Employment Pending'} • {user?.city || 'India'}
+                  </p>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4 mt-2">
@@ -68,8 +81,13 @@ export default function UnderwritingCockpit({ setCurrentPage, session }) {
                 </div>
               </div>
               <p className="font-body-md text-body-md text-on-surface-variant text-sm mt-1">
-                {metrics?.summary || 'Complete onboarding and upload a statement to generate live Corvus underwriting metrics.'}
+                {metrics?.summary || 'Complete onboarding and choose an intake path to generate Corvus underwriting metrics.'}
               </p>
+              {metrics && (
+                <p className="font-body-md text-body-md text-on-surface-variant text-xs mt-1 uppercase tracking-[0.2em]">
+                  Source: {intakeSource.replaceAll('_', ' ')}
+                </p>
+              )}
             </div>
 
             <div className="lg:col-span-3 bg-surface-container-low card-border rounded-xl p-6 flex flex-col justify-between items-start relative overflow-hidden">
@@ -86,7 +104,7 @@ export default function UnderwritingCockpit({ setCurrentPage, session }) {
                   <div className="h-full bg-tertiary rounded-full" style={{ width: `${metrics?.trust_score || 0}%` }}></div>
                 </div>
                 <span className="font-label-sm text-label-sm text-on-surface-variant mt-2 block text-xs">
-                  {metrics ? 'Updated from latest consensus run' : 'Awaiting first analysis'}
+                  {metrics ? `Updated from latest ${scoreStatus} consensus run` : 'Awaiting first analysis'}
                 </span>
               </div>
             </div>
@@ -144,7 +162,13 @@ export default function UnderwritingCockpit({ setCurrentPage, session }) {
                       </div>
                     </div>
                   );
-                }) : <p className="text-sm text-on-surface-variant">Category insights will appear after statement analysis.</p>}
+                }) : (
+                  <p className="text-sm text-on-surface-variant">
+                    {scoreStatus === 'provisional'
+                      ? 'Transaction-level outflow insights unlock after verified CSV upload.'
+                      : 'Category insights will appear after statement analysis.'}
+                  </p>
+                )}
               </div>
             </div>
 

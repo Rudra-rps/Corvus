@@ -33,6 +33,7 @@ func (h *Handler) Register(app *fiber.App) {
 	app.Post("/auth/login", h.login)
 	app.Post("/auth/verify", h.verifyOTP)
 	app.Post("/profile/:userID", h.saveProfile)
+	app.Post("/intake/:userID", h.saveIntake)
 	app.Get("/profile/:userID", h.getProfile)
 	app.Post("/upload", h.uploadCSV)
 	app.Post("/analyze/:userID", h.analyzeUser)
@@ -135,6 +136,37 @@ func (h *Handler) getProfile(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"user": user})
 }
 
+func (h *Handler) saveIntake(c *fiber.Ctx) error {
+	userID, err := c.ParamsInt("userID")
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid user id")
+	}
+	var req intakeRequest
+	if err := c.BodyParser(&req); err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, "invalid intake payload")
+	}
+	var profile models.FinancialProfile
+	if err := h.db.Where("user_id = ?", userID).First(&profile).Error; err != nil {
+		return err
+	}
+	profile.IntakeSource = req.IntakeSource
+	profile.LoanPurpose = req.LoanPurpose
+	profile.LoanAmountNeeded = req.LoanAmountNeeded
+	profile.Urgency = req.Urgency
+	profile.UseCase = req.UseCase
+	profile.AvgBalanceBand = req.AvgBalanceBand
+	profile.RentAmount = req.RentAmount
+	profile.DeclaredSpending = req.DeclaredSpending
+	profile.BusinessVintage = req.BusinessVintage
+	if req.IntakeSource != "csv_verified" {
+		profile.ScoreStatus = "provisional"
+	}
+	if err := h.db.Save(&profile).Error; err != nil {
+		return err
+	}
+	return c.JSON(fiber.Map{"profile": profile})
+}
+
 func (h *Handler) uploadCSV(c *fiber.Ctx) error {
 	userID, err := strconv.Atoi(c.FormValue("user_id"))
 	if err != nil || userID <= 0 {
@@ -175,11 +207,17 @@ func (h *Handler) analyzeUser(c *fiber.Ctx) error {
 	if err := h.db.First(&user, userID).Error; err != nil {
 		return fiber.NewError(fiber.StatusNotFound, "user not found")
 	}
+	var profile models.FinancialProfile
+	if err := h.db.Where("user_id = ?", userID).First(&profile).Error; err != nil {
+		return err
+	}
 	var transactions []models.Transaction
 	if err := h.db.Where("user_id = ?", userID).Find(&transactions).Error; err != nil {
 		return err
 	}
-	if len(transactions) == 0 {
+	mode := c.Query("mode")
+	isProvisional := mode == "provisional" || (len(transactions) == 0 && profile.IntakeSource != "")
+	if len(transactions) == 0 && !isProvisional {
 		return fiber.NewError(fiber.StatusBadRequest, "no transactions uploaded for user")
 	}
 
@@ -193,6 +231,9 @@ func (h *Handler) analyzeUser(c *fiber.Ctx) error {
 		"employment_type": user.EmploymentType,
 		"city":            user.City,
 		"age":             user.Age,
+	}
+	if isProvisional {
+		return h.analyzeProvisional(c, ctx, user, profile, profilePayload)
 	}
 
 	var classifyResp struct {
@@ -252,7 +293,7 @@ func (h *Handler) analyzeUser(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadGateway, err.Error())
 	}
 
-	recommendations, err := h.computeRecommendations(uint(userID), user, trustResp.TrustScore, riskResp.DTIRatio)
+	recommendations, err := h.computeRecommendations(uint(userID), user, trustResp.TrustScore, riskResp.DTIRatio, "verified", "csv_verified")
 	if err != nil {
 		return err
 	}
@@ -277,10 +318,6 @@ func (h *Handler) analyzeUser(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadGateway, err.Error())
 	}
 
-	var profile models.FinancialProfile
-	if err := h.db.Where("user_id = ?", userID).First(&profile).Error; err != nil {
-		return err
-	}
 	profile.MonthlyIncome = toFloat(trustResp.Metrics["monthly_income"])
 	profile.MonthlyEMI = user.MonthlyEMI
 	profile.MonthlySpending = toFloat(trustResp.Metrics["monthly_spending"])
@@ -295,6 +332,8 @@ func (h *Handler) analyzeUser(c *fiber.Ctx) error {
 	profile.SpendingConsistency = toFloat(trustResp.Metrics["spending_consistency"])
 	profile.EMIDiscipline = toFloat(trustResp.Metrics["emi_discipline"])
 	profile.BalanceScore = toFloat(trustResp.Metrics["balance_score"])
+	profile.ScoreStatus = "verified"
+	profile.IntakeSource = "csv_verified"
 	profile.Summary = explainResp.Summary
 	if err := h.db.Save(&profile).Error; err != nil {
 		return err
@@ -304,8 +343,108 @@ func (h *Handler) analyzeUser(c *fiber.Ctx) error {
 		"trust_score":     trustResp.TrustScore,
 		"risk_score":      riskResp.RiskScore,
 		"risk_category":   riskResp.RiskCategory,
+		"score_status":    profile.ScoreStatus,
+		"intake_source":   profile.IntakeSource,
 		"recommendations": recommendations,
 		"flags":           fraudResp.Flags,
+		"explanations":    explainResp,
+	})
+}
+
+func (h *Handler) analyzeProvisional(c *fiber.Ctx, ctx context.Context, user models.User, profile models.FinancialProfile, profilePayload fiber.Map) error {
+	var trustResp struct {
+		TrustScore float64        `json:"trust_score"`
+		Metrics    map[string]any `json:"metrics"`
+	}
+	if err := h.ai.Post(ctx, "/generate-provisional-score", fiber.Map{
+		"profile": profilePayload,
+		"intake": fiber.Map{
+			"loan_purpose":       profile.LoanPurpose,
+			"loan_amount_needed": profile.LoanAmountNeeded,
+			"urgency":            profile.Urgency,
+			"use_case":           profile.UseCase,
+			"avg_balance_band":   profile.AvgBalanceBand,
+			"rent_amount":        profile.RentAmount,
+			"declared_spending":  profile.DeclaredSpending,
+			"business_vintage":   profile.BusinessVintage,
+			"intake_source":      profile.IntakeSource,
+		},
+	}, &trustResp); err != nil {
+		return fiber.NewError(fiber.StatusBadGateway, err.Error())
+	}
+
+	var riskResp struct {
+		RiskScore           float64 `json:"risk_score"`
+		RiskCategory        string  `json:"risk_category"`
+		DefaultProbability  float64 `json:"default_probability"`
+		RepaymentConfidence float64 `json:"repayment_confidence"`
+		DTIRatio            float64 `json:"dti_ratio"`
+	}
+	if err := h.ai.Post(ctx, "/risk-analysis", fiber.Map{
+		"transactions": []map[string]any{},
+		"profile":      profilePayload,
+		"trust_score":  trustResp.TrustScore,
+		"metrics":      trustResp.Metrics,
+	}, &riskResp); err != nil {
+		return fiber.NewError(fiber.StatusBadGateway, err.Error())
+	}
+
+	recommendations, err := h.computeRecommendations(user.ID, user, trustResp.TrustScore, riskResp.DTIRatio, "provisional", profile.IntakeSource)
+	if err != nil {
+		return err
+	}
+
+	var explainResp struct {
+		Summary             string   `json:"summary"`
+		Positives           []string `json:"positives"`
+		Negatives           []string `json:"negatives"`
+		Improvements        []string `json:"improvements"`
+		RecommendationNotes []string `json:"recommendation_notes"`
+	}
+	if err := h.ai.Post(ctx, "/generate-explanations", fiber.Map{
+		"profile":             profilePayload,
+		"trust_score":         trustResp.TrustScore,
+		"risk_score":          riskResp.RiskScore,
+		"risk_category":       riskResp.RiskCategory,
+		"default_probability": riskResp.DefaultProbability,
+		"metrics":             trustResp.Metrics,
+		"recommendations":     recommendations,
+		"fraud_flags":         []string{},
+	}, &explainResp); err != nil {
+		return fiber.NewError(fiber.StatusBadGateway, err.Error())
+	}
+
+	profile.MonthlyIncome = toFloat(trustResp.Metrics["monthly_income"])
+	profile.MonthlyEMI = user.MonthlyEMI
+	profile.MonthlySpending = toFloat(trustResp.Metrics["monthly_spending"])
+	profile.AvgBalance = toFloat(trustResp.Metrics["average_balance"])
+	profile.TrustScore = trustResp.TrustScore
+	profile.RiskScore = riskResp.RiskScore
+	profile.DTIRatio = riskResp.DTIRatio
+	profile.DefaultProbability = riskResp.DefaultProbability
+	profile.RepaymentConfidence = riskResp.RepaymentConfidence
+	profile.RiskCategory = riskResp.RiskCategory
+	profile.IncomeStability = toFloat(trustResp.Metrics["income_stability"])
+	profile.SpendingConsistency = toFloat(trustResp.Metrics["spending_consistency"])
+	profile.EMIDiscipline = toFloat(trustResp.Metrics["emi_discipline"])
+	profile.BalanceScore = toFloat(trustResp.Metrics["balance_score"])
+	profile.ScoreStatus = "provisional"
+	if profile.IntakeSource == "" {
+		profile.IntakeSource = "quick_estimate"
+	}
+	profile.Summary = explainResp.Summary
+	if err := h.db.Save(&profile).Error; err != nil {
+		return err
+	}
+
+	return c.JSON(fiber.Map{
+		"trust_score":     trustResp.TrustScore,
+		"risk_score":      riskResp.RiskScore,
+		"risk_category":   riskResp.RiskCategory,
+		"score_status":    profile.ScoreStatus,
+		"intake_source":   profile.IntakeSource,
+		"recommendations": recommendations,
+		"flags":           []string{},
 		"explanations":    explainResp,
 	})
 }
@@ -376,6 +515,8 @@ func (h *Handler) getDashboard(c *fiber.Ctx) error {
 		"trust_score":          profile.TrustScore,
 		"risk_score":           profile.RiskScore,
 		"risk_category":        profile.RiskCategory,
+		"score_status":         profile.ScoreStatus,
+		"intake_source":        profile.IntakeSource,
 		"default_probability":  profile.DefaultProbability,
 		"repayment_confidence": profile.RepaymentConfidence,
 		"dti_ratio":            profile.DTIRatio,
@@ -385,12 +526,21 @@ func (h *Handler) getDashboard(c *fiber.Ctx) error {
 		"income_stability":     profile.IncomeStability,
 		"spending_consistency": profile.SpendingConsistency,
 		"emi_discipline":       profile.EMIDiscipline,
+		"loan_purpose":         profile.LoanPurpose,
+		"loan_amount_needed":   profile.LoanAmountNeeded,
+		"urgency":              profile.Urgency,
+		"use_case":             profile.UseCase,
 		"summary":              profile.Summary,
 	}
 	response.Charts = map[string]any{
 		"category_breakdown": categories,
 		"monthly_series":     monthlySeries,
 		"balance_trend":      balanceTrend,
+	}
+	if profile.ScoreStatus == "provisional" {
+		response.Charts["category_breakdown"] = []map[string]any{}
+		response.Charts["monthly_series"] = []map[string]any{}
+		response.Charts["balance_trend"] = []map[string]any{}
 	}
 	response.Flags = []string{}
 	return c.JSON(response)
@@ -422,6 +572,8 @@ func (h *Handler) getExplanations(c *fiber.Ctx) error {
 		"trust_score":   profile.TrustScore,
 		"risk_score":    profile.RiskScore,
 		"risk_category": profile.RiskCategory,
+		"score_status":  profile.ScoreStatus,
+		"intake_source": profile.IntakeSource,
 		"weights": []map[string]any{
 			{"name": "Income Stability", "weight": 40, "value": round2(profile.IncomeStability)},
 			{"name": "EMI Discipline", "weight": 25, "value": round2(profile.EMIDiscipline)},
@@ -431,7 +583,7 @@ func (h *Handler) getExplanations(c *fiber.Ctx) error {
 	})
 }
 
-func (h *Handler) computeRecommendations(userID uint, user models.User, trustScore, dti float64) ([]map[string]any, error) {
+func (h *Handler) computeRecommendations(userID uint, user models.User, trustScore, dti float64, scoreStatus, intakeSource string) ([]map[string]any, error) {
 	var lenders []models.Lender
 	if err := h.db.Find(&lenders).Error; err != nil {
 		return nil, err
@@ -454,13 +606,16 @@ func (h *Handler) computeRecommendations(userID uint, user models.User, trustSco
 		score += clampPart((trustScore-lender.MinTrustScore)*1.1, -20, 25)
 		score += clampPart((user.MonthlyIncome-lender.MinIncome)/2000, -20, 15)
 		score += clampPart((lender.MaxDTI-dti)*1.2, -25, 20)
+		if scoreStatus == "provisional" {
+			score -= 8
+		}
 		probability := round2(math.Max(5, math.Min(98, score)))
 		if probability < 35 {
 			continue
 		}
 		explanation := fmt.Sprintf(
-			"Matched on trust score %.0f, monthly income %.0f, and DTI %.1f%% against %s policy thresholds.",
-			trustScore, user.MonthlyIncome, dti, lender.Name,
+			"Matched on %s trust score %.0f, monthly income %.0f, and DTI %.1f%% against %s policy thresholds.",
+			scoreStatus, trustScore, user.MonthlyIncome, dti, lender.Name,
 		)
 		scoredResults = append(scoredResults, scored{lender: lender, probability: probability, explanation: explanation})
 	}
@@ -477,6 +632,8 @@ func (h *Handler) computeRecommendations(userID uint, user models.User, trustSco
 			Explanation:         result.explanation,
 			InterestRateRange:   fmt.Sprintf("%.1f%% - %.1f%%", result.lender.InterestRateMin, result.lender.InterestRateMax),
 			Rank:                idx + 1,
+			ScoreStatus:         scoreStatus,
+			IntakeSource:        intakeSource,
 		}
 		if err := h.db.Create(&rec).Error; err != nil {
 			return nil, err
@@ -488,6 +645,8 @@ func (h *Handler) computeRecommendations(userID uint, user models.User, trustSco
 			"max_loan_amount":      result.lender.MaxLoanAmount,
 			"explanation":          result.explanation,
 			"rank":                 idx + 1,
+			"score_status":         scoreStatus,
+			"intake_source":        intakeSource,
 		})
 	}
 	return recommendationPayloads, nil
