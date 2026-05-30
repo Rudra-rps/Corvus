@@ -304,6 +304,9 @@ func (h *Handler) analyzeUser(c *fiber.Ctx) error {
 		Negatives           []string `json:"negatives"`
 		Improvements        []string `json:"improvements"`
 		RecommendationNotes []string `json:"recommendation_notes"`
+		AIGenerated         bool     `json:"ai_generated"`
+		Provider            string   `json:"provider,omitempty"`
+		Model               string   `json:"model,omitempty"`
 	}
 	if err := h.ai.Post(ctx, "/generate-explanations", fiber.Map{
 		"profile":             profilePayload,
@@ -400,6 +403,9 @@ func (h *Handler) analyzeProvisional(c *fiber.Ctx, ctx context.Context, user mod
 		Negatives           []string `json:"negatives"`
 		Improvements        []string `json:"improvements"`
 		RecommendationNotes []string `json:"recommendation_notes"`
+		AIGenerated         bool     `json:"ai_generated"`
+		Provider            string   `json:"provider,omitempty"`
+		Model               string   `json:"model,omitempty"`
 	}
 	if err := h.ai.Post(ctx, "/generate-explanations", fiber.Map{
 		"profile":             profilePayload,
@@ -592,6 +598,11 @@ func (h *Handler) computeRecommendations(userID uint, user models.User, trustSco
 		return nil, err
 	}
 
+	// Pull loan amount from profile for amount-range checks
+	var profile models.FinancialProfile
+	h.db.Where("user_id = ?", userID).First(&profile)
+	requestedAmount := profile.LoanAmountNeeded
+
 	type scored struct {
 		lender      models.Lender
 		probability float64
@@ -599,13 +610,41 @@ func (h *Handler) computeRecommendations(userID uint, user models.User, trustSco
 	}
 	var scoredResults []scored
 	for _, lender := range lenders {
+		// --- Hard filters ---
+		// Employment type gate
 		if lender.EmploymentType != "Any" && !strings.EqualFold(lender.EmploymentType, user.EmploymentType) {
 			continue
 		}
+		// Age gate
+		if lender.MinAge > 0 && user.Age > 0 && user.Age < lender.MinAge {
+			continue
+		}
+		if lender.MaxAge > 0 && user.Age > 0 && user.Age > lender.MaxAge {
+			continue
+		}
+		// Loan amount gate
+		if requestedAmount > 0 {
+			if lender.MaxLoanAmount > 0 && requestedAmount > lender.MaxLoanAmount {
+				continue
+			}
+			if lender.MinLoanAmount > 0 && requestedAmount < lender.MinLoanAmount {
+				continue
+			}
+		}
+		// Thin-file gate: if lender requires CIBIL and borrower has no bureau data, skip unless ThinFileOk
+		if lender.MinCIBILScore > 0 && !lender.ThinFileOk && trustScore < 45 {
+			continue
+		}
+
+		// --- Scoring ---
 		score := 55.0
 		score += clampPart((trustScore-lender.MinTrustScore)*1.1, -20, 25)
 		score += clampPart((user.MonthlyIncome-lender.MinIncome)/2000, -20, 15)
 		score += clampPart((lender.MaxDTI-dti)*1.2, -25, 20)
+		// Thin-file bonus: lenders that accept no-bureau profiles get a boost for low-trust borrowers
+		if lender.ThinFileOk && trustScore < 55 {
+			score += 5
+		}
 		if scoreStatus == "provisional" {
 			score -= 8
 		}
@@ -613,9 +652,24 @@ func (h *Handler) computeRecommendations(userID uint, user models.User, trustSco
 		if probability < 35 {
 			continue
 		}
+
+		// --- Rich explanation ---
 		explanation := fmt.Sprintf(
-			"Matched on %s trust score %.0f, monthly income %.0f, and DTI %.1f%% against %s policy thresholds.",
-			scoreStatus, trustScore, user.MonthlyIncome, dti, lender.Name,
+			"%s is a %s offering INR %s-INR %s at %.1f%%-%.1f%% p.a. "+
+				"Disbursal: %s. Processing fee: %.1f%%-%.1f%%. "+
+				"Matched on trust score %.0f, monthly income INR %.0f, and DTI %.1f%%.",
+			lender.Name,
+			lender.LenderType,
+			formatLakh(lender.MinLoanAmount),
+			formatLakh(lender.MaxLoanAmount),
+			lender.InterestRateMin,
+			lender.InterestRateMax,
+			lender.DisbursalSpeed,
+			lender.ProcessingFeeMin,
+			lender.ProcessingFeeMax,
+			trustScore,
+			user.MonthlyIncome,
+			dti,
 		)
 		scoredResults = append(scoredResults, scored{lender: lender, probability: probability, explanation: explanation})
 	}
@@ -640,9 +694,18 @@ func (h *Handler) computeRecommendations(userID uint, user models.User, trustSco
 		}
 		recommendationPayloads = append(recommendationPayloads, map[string]any{
 			"name":                 result.lender.Name,
+			"lender_type":          result.lender.LenderType,
+			"description":          result.lender.Description,
+			"website":              result.lender.Website,
 			"approval_probability": result.probability,
 			"interest_rate_range":  rec.InterestRateRange,
+			"min_loan_amount":      result.lender.MinLoanAmount,
 			"max_loan_amount":      result.lender.MaxLoanAmount,
+			"min_tenure_months":    result.lender.MinTenureMonths,
+			"max_tenure_months":    result.lender.MaxTenureMonths,
+			"processing_fee_range": fmt.Sprintf("%.1f%% - %.1f%%", result.lender.ProcessingFeeMin, result.lender.ProcessingFeeMax),
+			"disbursal_speed":      result.lender.DisbursalSpeed,
+			"thin_file_ok":         result.lender.ThinFileOk,
 			"explanation":          result.explanation,
 			"rank":                 idx + 1,
 			"score_status":         scoreStatus,
@@ -650,6 +713,16 @@ func (h *Handler) computeRecommendations(userID uint, user models.User, trustSco
 		})
 	}
 	return recommendationPayloads, nil
+}
+
+func formatLakh(amount float64) string {
+	if amount >= 100000 {
+		return fmt.Sprintf("%.0fL", amount/100000)
+	}
+	if amount >= 1000 {
+		return fmt.Sprintf("%.0fK", amount/1000)
+	}
+	return fmt.Sprintf("%.0f", amount)
 }
 
 func parseCSV(fileHeader *multipart.FileHeader) ([]models.Transaction, error) {
@@ -734,7 +807,9 @@ func getByAliases(record []string, indexMap map[string]int, aliases ...string) s
 
 func parseNumber(value string) (float64, error) {
 	clean := strings.ReplaceAll(value, ",", "")
-	clean = strings.ReplaceAll(clean, "₹", "")
+	clean = strings.ReplaceAll(clean, "INR", "")
+	clean = strings.ReplaceAll(clean, "Rs.", "")
+	clean = strings.ReplaceAll(clean, "Rs", "")
 	clean = strings.TrimSpace(clean)
 	if clean == "" {
 		return 0, nil

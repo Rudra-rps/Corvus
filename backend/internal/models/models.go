@@ -66,17 +66,31 @@ type Transaction struct {
 }
 
 type Lender struct {
-	ID              uint      `gorm:"primaryKey" json:"id"`
-	Name            string    `json:"name"`
-	MinIncome       float64   `json:"min_income"`
-	MaxDTI          float64   `json:"max_dti"`
-	MinTrustScore   float64   `json:"min_trust_score"`
-	InterestRateMin float64   `json:"interest_rate_min"`
-	InterestRateMax float64   `json:"interest_rate_max"`
-	MaxLoanAmount   float64   `json:"max_loan_amount"`
-	EmploymentType  string    `json:"employment_type"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID               uint      `gorm:"primaryKey" json:"id"`
+	Name             string    `json:"name"`
+	LenderType       string    `json:"lender_type"` // NBFC, Bank, Fintech
+	Description      string    `json:"description"`
+	Website          string    `json:"website"`
+	MinIncome        float64   `json:"min_income"`
+	MaxDTI           float64   `json:"max_dti"`
+	MinTrustScore    float64   `json:"min_trust_score"`
+	InterestRateMin  float64   `json:"interest_rate_min"`
+	InterestRateMax  float64   `json:"interest_rate_max"`
+	MinLoanAmount    float64   `json:"min_loan_amount"`
+	MaxLoanAmount    float64   `json:"max_loan_amount"`
+	MinTenureMonths  int       `json:"min_tenure_months"`
+	MaxTenureMonths  int       `json:"max_tenure_months"`
+	MinAge           int       `json:"min_age"`
+	MaxAge           int       `json:"max_age"`
+	MinCIBILScore    int       `json:"min_cibil_score"`    // 0 = no bureau required
+	ProcessingFeeMin float64   `json:"processing_fee_min"` // percentage
+	ProcessingFeeMax float64   `json:"processing_fee_max"`
+	DisbursalSpeed   string    `json:"disbursal_speed"` // e.g. "Same Day", "2-3 Days"
+	GeographyTier    string    `json:"geography_tier"`  // "All", "Metro", "Tier1", "Tier1+Tier2"
+	EmploymentType   string    `json:"employment_type"` // "Any", "Salaried", "Self-Employed"
+	ThinFileOk       bool      `json:"thin_file_ok"`    // accepts users with no/low CIBIL
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 type Recommendation struct {

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import json
+import os
+import urllib.error
+import urllib.request
 from collections import Counter, defaultdict
 from math import exp
 from statistics import mean, pstdev
@@ -10,6 +14,11 @@ from pydantic import BaseModel, Field
 
 
 app = FastAPI(title="Corvus AI Service", version="0.1.0")
+
+OPENAI_API_URL = "https://api.openai.com/v1/responses"
+DEFAULT_OPENAI_MODEL = "gpt-4.1-mini"
+XAI_API_URL = "https://api.x.ai/v1/chat/completions"
+DEFAULT_XAI_MODEL = "grok-4"
 
 
 class TransactionInput(BaseModel):
@@ -132,7 +141,12 @@ def compute_monthly_rollups(transactions: list[TransactionInput]) -> dict[str, d
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok"}
+    provider = configured_llm_provider()
+    return {
+        "status": "ok",
+        "llm_enabled": "true" if provider else "false",
+        "llm_provider": provider or "deterministic",
+    }
 
 
 @app.post("/classify-transactions")
@@ -328,8 +342,7 @@ def fraud_analysis(payload: FraudAnalysisRequest) -> dict[str, Any]:
     return {"flags": flags}
 
 
-@app.post("/generate-explanations")
-def generate_explanations(payload: ExplainabilityRequest) -> dict[str, Any]:
+def deterministic_explanations(payload: ExplainabilityRequest) -> dict[str, Any]:
     metrics = payload.metrics
     positives = []
     negatives = []
@@ -371,4 +384,218 @@ def generate_explanations(payload: ExplainabilityRequest) -> dict[str, Any]:
             "Preserve regular income inflows to strengthen the trust score.",
         ],
         "recommendation_notes": recommendation_notes,
+        "ai_generated": False,
     }
+
+
+def response_text(response: dict[str, Any]) -> str:
+    if isinstance(response.get("output_text"), str):
+        return response["output_text"]
+    chunks: list[str] = []
+    for item in response.get("output", []):
+        for content in item.get("content", []):
+            if content.get("type") in {"output_text", "text"} and isinstance(content.get("text"), str):
+                chunks.append(content["text"])
+    return "".join(chunks)
+
+
+def configured_llm_provider() -> str | None:
+    requested = os.getenv("LLM_PROVIDER", "").strip().lower()
+    if requested in {"grok", "xai"} and os.getenv("XAI_API_KEY"):
+        return "grok"
+    if requested == "openai" and os.getenv("OPENAI_API_KEY"):
+        return "openai"
+    if os.getenv("XAI_API_KEY"):
+        return "grok"
+    if os.getenv("OPENAI_API_KEY"):
+        return "openai"
+    return None
+
+
+def build_explanation_prompt(payload: ExplainabilityRequest, fallback: dict[str, Any]) -> dict[str, Any]:
+    prompt = {
+        "borrower_profile": payload.profile.model_dump(),
+        "trust_score": payload.trust_score,
+        "risk_score": payload.risk_score,
+        "risk_category": payload.risk_category,
+        "default_probability": payload.default_probability,
+        "metrics": payload.metrics,
+        "top_recommendations": payload.recommendations[:5],
+        "fraud_flags": payload.fraud_flags,
+        "deterministic_baseline": fallback,
+    }
+    return prompt
+
+
+def parse_generated_explanation(text: str) -> dict[str, Any] | None:
+    try:
+        generated = json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start < 0 or end < start:
+            return None
+        try:
+            generated = json.loads(text[start : end + 1])
+        except json.JSONDecodeError:
+            return None
+    for key in ("summary", "positives", "negatives", "improvements", "recommendation_notes"):
+        if key not in generated:
+            return None
+    return generated
+
+
+def call_openai_explanations(payload: ExplainabilityRequest, fallback: dict[str, Any]) -> dict[str, Any] | None:
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return None
+
+    model = os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL)
+    prompt = build_explanation_prompt(payload, fallback)
+    request_body = {
+        "model": model,
+        "input": [
+            {
+                "role": "developer",
+                "content": (
+                    "You are Corvus AI, a responsible loan discovery assistant for India. "
+                    "Explain underwriting outputs in plain language. Do not claim guaranteed approval. "
+                    "Do not invent lender policies beyond the provided data. Keep recommendations concise, "
+                    "practical, and borrower-friendly."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    "Create a borrower-facing explanation JSON from this scoring payload. "
+                    f"Payload: {json.dumps(prompt, ensure_ascii=True)}"
+                ),
+            },
+        ],
+        "text": {
+            "format": {
+                "type": "json_schema",
+                "name": "corvus_explanation",
+                "strict": True,
+                "schema": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "summary": {"type": "string"},
+                        "positives": {"type": "array", "items": {"type": "string"}},
+                        "negatives": {"type": "array", "items": {"type": "string"}},
+                        "improvements": {"type": "array", "items": {"type": "string"}},
+                        "recommendation_notes": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": [
+                        "summary",
+                        "positives",
+                        "negatives",
+                        "improvements",
+                        "recommendation_notes",
+                    ],
+                },
+            }
+        },
+    }
+    request = urllib.request.Request(
+        OPENAI_API_URL,
+        data=json.dumps(request_body).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            parsed = json.loads(response.read().decode("utf-8"))
+        generated = parse_generated_explanation(response_text(parsed))
+    except (json.JSONDecodeError, OSError, TimeoutError, urllib.error.URLError, urllib.error.HTTPError):
+        return None
+
+    if not generated:
+        return None
+    generated["ai_generated"] = True
+    generated["provider"] = "openai"
+    generated["model"] = model
+    return generated
+
+
+def call_grok_explanations(payload: ExplainabilityRequest, fallback: dict[str, Any]) -> dict[str, Any] | None:
+    api_key = os.getenv("XAI_API_KEY")
+    if not api_key:
+        return None
+
+    model = os.getenv("XAI_MODEL", DEFAULT_XAI_MODEL)
+    prompt = build_explanation_prompt(payload, fallback)
+    schema_instruction = {
+        "summary": "string",
+        "positives": ["string"],
+        "negatives": ["string"],
+        "improvements": ["string"],
+        "recommendation_notes": ["string"],
+    }
+    request_body = {
+        "model": model,
+        "temperature": 0.2,
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You are Corvus AI, a responsible loan discovery assistant for India. "
+                    "Return only valid JSON. Do not claim guaranteed approval. Do not invent lender "
+                    "policies beyond the supplied data."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    "Create a borrower-facing explanation using this exact JSON shape: "
+                    f"{json.dumps(schema_instruction, ensure_ascii=True)}. "
+                    f"Scoring payload: {json.dumps(prompt, ensure_ascii=True)}"
+                ),
+            },
+        ],
+    }
+    request = urllib.request.Request(
+        XAI_API_URL,
+        data=json.dumps(request_body).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            parsed = json.loads(response.read().decode("utf-8"))
+        content = parsed["choices"][0]["message"]["content"]
+        generated = parse_generated_explanation(content)
+    except (KeyError, IndexError, TypeError, OSError, TimeoutError, urllib.error.URLError, urllib.error.HTTPError):
+        return None
+
+    if not generated:
+        return None
+    generated["ai_generated"] = True
+    generated["provider"] = "grok"
+    generated["model"] = model
+    return generated
+
+
+def generate_llm_explanations(payload: ExplainabilityRequest, fallback: dict[str, Any]) -> dict[str, Any] | None:
+    provider = configured_llm_provider()
+    if provider == "grok":
+        return call_grok_explanations(payload, fallback)
+    if provider == "openai":
+        return call_openai_explanations(payload, fallback)
+    return None
+
+
+@app.post("/generate-explanations")
+def generate_explanations(payload: ExplainabilityRequest) -> dict[str, Any]:
+    fallback = deterministic_explanations(payload)
+    return generate_llm_explanations(payload, fallback) or fallback

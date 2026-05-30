@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { requestOtp, verifyOtp } from '../lib/api';
 
 export default function LoginPage({ onLoginSuccess, setCurrentPage }) {

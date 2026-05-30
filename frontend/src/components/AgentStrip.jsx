@@ -1,4 +1,3 @@
-import React from 'react';
 
 export default function AgentStrip({ parsingStatus = 'Standby', stabilityStatus = 'Standby', riskStatus = 'Standby' }) {
   const getStatusColor = (status) => {

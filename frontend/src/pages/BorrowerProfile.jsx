@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { saveProfile } from '../lib/api';
 
 export default function BorrowerProfile({ setCurrentPage, user, onProfileSaved }) {

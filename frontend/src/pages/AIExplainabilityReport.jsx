@@ -1,4 +1,3 @@
-import React from 'react';
 
 export default function AIExplainabilityReport({ setCurrentPage, session }) {
   const explanations = session?.explanations;
@@ -32,6 +31,12 @@ export default function AIExplainabilityReport({ setCurrentPage, session }) {
                 }`}>
                   {scoreStatus}
                 </span>
+                {explanations?.ai_generated && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-tertiary-container/30 text-tertiary border border-tertiary-container">
+                    <span className="material-symbols-outlined text-[14px]">auto_awesome</span>
+                    AI enhanced
+                  </span>
+                )}
               </div>
               <p className="font-body-lg text-body-lg text-on-surface-variant max-w-2xl">
                 {explanations?.summary || 'Comprehensive breakdown of algorithmic assessment and weighted factors influencing the final trust score.'}
